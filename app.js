@@ -1436,5 +1436,10 @@ function applyURLState(state) {
                 }
             }, 100);
         }
+
+        // Automatically fetch data after all settings are applied
+        setTimeout(() => {
+            fetchWeatherData();
+        }, 800);
     }, 600);
 }
