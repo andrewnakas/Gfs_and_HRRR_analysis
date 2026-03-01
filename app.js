@@ -7,9 +7,46 @@ let selectedLon = null;
 let charts = {};
 let comparisonEnabled = false;
 let comparisonYear = null;
+let currentModel = 'gefs';
 
-// GEFS grid resolution (0.25 degrees)
-const GEFS_GRID_RESOLUTION = 0.25;
+// Model configurations
+const MODEL_CONFIGS = {
+    gefs: {
+        name: 'GEFS',
+        fullName: 'Global Ensemble Forecast System',
+        gridResolution: 0.25,
+        gridUnit: 'degrees',
+        temporalResolution: '3 hours',
+        minDate: '2000-01-01',
+        coverage: 'Global',
+        bounds: null // Global coverage
+    },
+    gfs: {
+        name: 'GFS',
+        fullName: 'Global Forecast System',
+        gridResolution: 0.25,
+        gridUnit: 'degrees',
+        temporalResolution: '1 hour',
+        minDate: '2021-05-01',
+        coverage: 'Global',
+        bounds: null // Global coverage
+    },
+    hrrr: {
+        name: 'HRRR',
+        fullName: 'High-Resolution Rapid Refresh',
+        gridResolution: 3,
+        gridUnit: 'km',
+        temporalResolution: '1 hour',
+        minDate: '2014-10-01',
+        coverage: 'Continental US',
+        bounds: {
+            north: 50.0,
+            south: 21.0,
+            east: -60.0,
+            west: -134.0
+        }
+    }
+};
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
@@ -23,6 +60,9 @@ document.addEventListener('DOMContentLoaded', function() {
         selectLocation(45.2615, -111.3081);
         map.setView([45.2615, -111.3081], 9);
     }, 500);
+
+    // Initialize with default model
+    updateModelInfo();
 });
 
 // Initialize Leaflet map
@@ -43,25 +83,57 @@ function initializeMap() {
     });
 }
 
-// Snap coordinates to GEFS grid
+// Get current model configuration
+function getModelConfig() {
+    return MODEL_CONFIGS[currentModel];
+}
+
+// Snap coordinates to model grid
 function snapToGrid(lat, lon) {
-    const snappedLat = Math.round(lat / GEFS_GRID_RESOLUTION) * GEFS_GRID_RESOLUTION;
-    const snappedLon = Math.round(lon / GEFS_GRID_RESOLUTION) * GEFS_GRID_RESOLUTION;
+    const config = getModelConfig();
+
+    // For HRRR, use approximate lat/lon snapping (3km ≈ 0.027°)
+    // In production, would convert to Lambert Conformal Conic coordinates
+    const resolution = config.gridUnit === 'km' ? config.gridResolution / 111.0 : config.gridResolution;
+
+    const snappedLat = Math.round(lat / resolution) * resolution;
+    const snappedLon = Math.round(lon / resolution) * resolution;
     return { lat: snappedLat, lon: snappedLon };
 }
 
 // Get grid cell bounds
 function getGridBounds(centerLat, centerLon) {
-    const halfGrid = GEFS_GRID_RESOLUTION / 2;
+    const config = getModelConfig();
+    const resolution = config.gridUnit === 'km' ? config.gridResolution / 111.0 : config.gridResolution;
+    const halfGrid = resolution / 2;
     return [
         [centerLat - halfGrid, centerLon - halfGrid],
         [centerLat + halfGrid, centerLon + halfGrid]
     ];
 }
 
+// Check if location is within model coverage
+function isLocationValid(lat, lon) {
+    const config = getModelConfig();
+    if (!config.bounds) return true; // Global coverage
+
+    return lat >= config.bounds.south &&
+           lat <= config.bounds.north &&
+           lon >= config.bounds.west &&
+           lon <= config.bounds.east;
+}
+
 // Select location on map
 function selectLocation(lat, lon) {
-    // Snap to GEFS grid
+    const config = getModelConfig();
+
+    // Check if location is valid for current model
+    if (!isLocationValid(lat, lon)) {
+        showError(`Location is outside ${config.name} coverage area (${config.coverage}). Please select a location within the coverage area.`);
+        return;
+    }
+
+    // Snap to model grid
     const snapped = snapToGrid(lat, lon);
     selectedLat = snapped.lat;
     selectedLon = snapped.lon;
@@ -74,7 +146,7 @@ function selectLocation(lat, lon) {
         map.removeLayer(gridSquare);
     }
 
-    // Add GEFS grid square
+    // Add model grid square
     const bounds = getGridBounds(selectedLat, selectedLon);
     gridSquare = L.rectangle(bounds, {
         color: '#667eea',
@@ -85,16 +157,19 @@ function selectLocation(lat, lon) {
 
     // Add marker at grid center
     marker = L.marker([selectedLat, selectedLon]).addTo(map);
+    const resolutionText = config.gridUnit === 'km'
+        ? `~${config.gridResolution} ${config.gridUnit}`
+        : `${config.gridResolution}°`;
     marker.bindPopup(
-        `<b>GEFS Grid Point</b><br>` +
-        `Center: ${selectedLat.toFixed(2)}°, ${selectedLon.toFixed(2)}°<br>` +
-        `Resolution: ${GEFS_GRID_RESOLUTION}°<br>` +
+        `<b>${config.name} Grid Point</b><br>` +
+        `Center: ${selectedLat.toFixed(4)}°, ${selectedLon.toFixed(4)}°<br>` +
+        `Resolution: ${resolutionText}<br>` +
         `<small>Clicked: ${lat.toFixed(4)}°, ${lon.toFixed(4)}°</small>`
     ).openPopup();
 
     // Update info display
-    document.getElementById('location-info').textContent = `Grid Point: ${selectedLat.toFixed(2)}°, ${selectedLon.toFixed(2)}°`;
-    document.getElementById('coords-info').textContent = `${selectedLat.toFixed(2)}°, ${selectedLon.toFixed(2)}° (GEFS Grid)`;
+    document.getElementById('location-info').textContent = `Grid Point: ${selectedLat.toFixed(4)}°, ${selectedLon.toFixed(4)}°`;
+    document.getElementById('coords-info').textContent = `${selectedLat.toFixed(4)}°, ${selectedLon.toFixed(4)}° (${config.name} Grid)`;
 
     // Reverse geocoding to get location name
     fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${selectedLat}&lon=${selectedLon}`)
@@ -111,23 +186,63 @@ function selectLocation(lat, lon) {
 // Initialize date pickers
 function initializeDatePickers() {
     const today = new Date();
+    const config = getModelConfig();
+    const modelMinDate = new Date(config.minDate);
     const thirtyDaysAgo = new Date(today.getTime() - (30 * 24 * 60 * 60 * 1000));
 
-    flatpickr("#start-date", {
-        defaultDate: thirtyDaysAgo,
+    // Use the later of 30 days ago or model min date
+    const defaultStartDate = thirtyDaysAgo > modelMinDate ? thirtyDaysAgo : modelMinDate;
+
+    window.startDatePicker = flatpickr("#start-date", {
+        defaultDate: defaultStartDate,
+        minDate: config.minDate,
         maxDate: today,
         dateFormat: "Y-m-d",
         onChange: updateComparisonYearOptions
     });
 
-    flatpickr("#end-date", {
+    window.endDatePicker = flatpickr("#end-date", {
         defaultDate: today,
+        minDate: config.minDate,
         maxDate: today,
         dateFormat: "Y-m-d",
         onChange: updateComparisonYearOptions
     });
 
     // Initialize comparison year dropdown
+    updateComparisonYearOptions();
+}
+
+// Update date pickers when model changes
+function updateDatePickerConstraints() {
+    const config = getModelConfig();
+    const today = new Date();
+    const modelMinDate = new Date(config.minDate);
+
+    if (window.startDatePicker) {
+        window.startDatePicker.set('minDate', config.minDate);
+        window.startDatePicker.set('maxDate', today);
+
+        // Reset to default if current date is out of range
+        const currentStart = window.startDatePicker.selectedDates[0];
+        if (!currentStart || currentStart < modelMinDate) {
+            const thirtyDaysAgo = new Date(today.getTime() - (30 * 24 * 60 * 60 * 1000));
+            const defaultStartDate = thirtyDaysAgo > modelMinDate ? thirtyDaysAgo : modelMinDate;
+            window.startDatePicker.setDate(defaultStartDate);
+        }
+    }
+
+    if (window.endDatePicker) {
+        window.endDatePicker.set('minDate', config.minDate);
+        window.endDatePicker.set('maxDate', today);
+
+        // Reset to default if current date is out of range
+        const currentEnd = window.endDatePicker.selectedDates[0];
+        if (!currentEnd || currentEnd < modelMinDate) {
+            window.endDatePicker.setDate(today);
+        }
+    }
+
     updateComparisonYearOptions();
 }
 
@@ -155,6 +270,17 @@ function updateComparisonYearOptions() {
 function setupEventListeners() {
     document.getElementById('fetch-data').addEventListener('click', fetchWeatherData);
 
+    document.getElementById('model-select').addEventListener('change', (e) => {
+        currentModel = e.target.value;
+        updateModelInfo();
+        updateDatePickerConstraints();
+
+        // Revalidate current location if one is selected
+        if (selectedLat !== null && selectedLon !== null) {
+            selectLocation(selectedLat, selectedLon);
+        }
+    });
+
     document.getElementById('enable-comparison').addEventListener('change', (e) => {
         comparisonEnabled = e.target.checked;
         document.getElementById('comparison-year').disabled = !comparisonEnabled;
@@ -167,6 +293,24 @@ function setupEventListeners() {
     document.getElementById('comparison-year').addEventListener('change', (e) => {
         comparisonYear = e.target.value ? parseInt(e.target.value) : null;
     });
+}
+
+// Update model information display
+function updateModelInfo() {
+    const config = getModelConfig();
+    const resolutionText = config.gridUnit === 'km'
+        ? `${config.gridResolution}${config.gridUnit}`
+        : `${config.gridResolution}°`;
+    const infoText = `${config.fullName} - ${config.coverage}, ${resolutionText} grid, ${config.temporalResolution} data, available from ${config.minDate}`;
+
+    // Update title
+    document.querySelector('h1').textContent = `🌤️ ${config.name} Analysis Dashboard`;
+
+    // Update model info
+    const modelInfoElement = document.getElementById('model-info');
+    if (modelInfoElement) {
+        modelInfoElement.textContent = infoText;
+    }
 }
 
 // Fetch weather data from Open-Meteo API
@@ -277,6 +421,7 @@ function renderCharts(data, comparisonData = null) {
         if (chart) chart.destroy();
     });
 
+    const config = getModelConfig();
     const dates = data.daily.time;
     const primaryYear = new Date(dates[0]).getFullYear();
     const comparisonYear = comparisonData ? new Date(comparisonData.daily.time[0]).getFullYear() : null;
@@ -354,7 +499,7 @@ function renderCharts(data, comparisonData = null) {
     // Temperature Chart
     const tempDatasets = [
         {
-            label: `Max Temperature ${primaryYear} (°C)`,
+            label: `${config.name} Max Temp ${primaryYear} (°C)`,
             data: data.daily.temperature_2m_max,
             borderColor: 'rgb(255, 99, 132)',
             backgroundColor: 'rgba(255, 99, 132, 0.1)',
@@ -362,7 +507,7 @@ function renderCharts(data, comparisonData = null) {
             fill: true
         },
         {
-            label: `Mean Temperature ${primaryYear} (°C)`,
+            label: `${config.name} Mean Temp ${primaryYear} (°C)`,
             data: data.daily.temperature_2m_mean,
             borderColor: 'rgb(255, 159, 64)',
             backgroundColor: 'rgba(255, 159, 64, 0.1)',
@@ -370,7 +515,7 @@ function renderCharts(data, comparisonData = null) {
             fill: true
         },
         {
-            label: `Min Temperature ${primaryYear} (°C)`,
+            label: `${config.name} Min Temp ${primaryYear} (°C)`,
             data: data.daily.temperature_2m_min,
             borderColor: 'rgb(54, 162, 235)',
             backgroundColor: 'rgba(54, 162, 235, 0.1)',
@@ -761,6 +906,7 @@ function hideError() {
 function renderPrecipSnowPlumes(data, comparisonData = null) {
     document.getElementById('ensemble-charts').style.display = 'block';
 
+    const config = getModelConfig();
     const isMobile = window.innerWidth <= 768;
     const fontSize = isMobile ? 9 : 12;
     const titleSize = isMobile ? 11 : 14;
@@ -808,7 +954,7 @@ function renderPrecipSnowPlumes(data, comparisonData = null) {
 
     const precipPlumeDatasets = [
         {
-            label: `Total Precipitation ${primaryYear}`,
+            label: `${config.name} Total Precipitation ${primaryYear}`,
             data: data.daily.precipitation_sum,
             borderColor: 'rgb(54, 162, 235)',
             backgroundColor: 'rgba(54, 162, 235, 0.3)',
@@ -817,7 +963,7 @@ function renderPrecipSnowPlumes(data, comparisonData = null) {
             fill: false
         },
         {
-            label: `Rain ${primaryYear}`,
+            label: `${config.name} Rain ${primaryYear}`,
             data: data.daily.rain_sum,
             borderColor: 'rgb(75, 192, 192)',
             backgroundColor: 'rgba(75, 192, 192, 0.2)',
