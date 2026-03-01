@@ -54,12 +54,20 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeDatePickers();
     setupEventListeners();
 
-    // Set Big Sky, Montana as default location
-    // Coordinates: 45.2615°N, 111.3081°W
-    setTimeout(() => {
-        selectLocation(45.2615, -111.3081);
-        map.setView([45.2615, -111.3081], 9);
-    }, 500);
+    // Check if URL has shared parameters
+    const urlParams = loadStateFromURL();
+
+    if (urlParams) {
+        // Load state from URL
+        applyURLState(urlParams);
+    } else {
+        // Set Big Sky, Montana as default location
+        // Coordinates: 45.2615°N, 111.3081°W
+        setTimeout(() => {
+            selectLocation(45.2615, -111.3081);
+            map.setView([45.2615, -111.3081], 9);
+        }, 500);
+    }
 
     // Initialize with default model
     updateModelInfo();
@@ -269,6 +277,8 @@ function updateComparisonYearOptions() {
 // Setup event listeners
 function setupEventListeners() {
     document.getElementById('fetch-data').addEventListener('click', fetchWeatherData);
+
+    document.getElementById('share-btn').addEventListener('click', generateShareURL);
 
     document.getElementById('model-select').addEventListener('change', (e) => {
         currentModel = e.target.value;
@@ -902,6 +912,24 @@ function hideError() {
     errorDiv.classList.remove('active');
 }
 
+// Show success message
+function showSuccess(message) {
+    const successDiv = document.getElementById('success');
+    successDiv.innerHTML = message;
+    successDiv.classList.add('active');
+
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+        successDiv.classList.remove('active');
+    }, 5000);
+}
+
+// Hide success message
+function hideSuccess() {
+    const successDiv = document.getElementById('success');
+    successDiv.classList.remove('active');
+}
+
 // Render precipitation and snow plume-style charts from historical data
 function renderPrecipSnowPlumes(data, comparisonData = null) {
     document.getElementById('ensemble-charts').style.display = 'block';
@@ -1285,4 +1313,128 @@ function renderPrecipSnowPlumes(data, comparisonData = null) {
             }
         }
     });
+}
+
+// ============================================================================
+// URL SHARING FUNCTIONALITY
+// ============================================================================
+
+// Generate shareable URL from current state
+function generateShareURL() {
+    // Validate that we have the minimum required data
+    if (selectedLat === null || selectedLon === null) {
+        showError('Please select a location on the map first!');
+        return;
+    }
+
+    const startDate = document.getElementById('start-date').value;
+    const endDate = document.getElementById('end-date').value;
+
+    if (!startDate || !endDate) {
+        showError('Please select start and end dates!');
+        return;
+    }
+
+    // Build URL parameters
+    const params = new URLSearchParams();
+    params.set('model', currentModel);
+    params.set('lat', selectedLat.toFixed(6));
+    params.set('lon', selectedLon.toFixed(6));
+    params.set('start', startDate);
+    params.set('end', endDate);
+
+    // Add comparison data if enabled
+    if (comparisonEnabled && comparisonYear) {
+        params.set('compare', '1');
+        params.set('compYear', comparisonYear.toString());
+    }
+
+    // Build the full URL
+    const baseUrl = window.location.origin + window.location.pathname;
+    const shareUrl = `${baseUrl}?${params.toString()}`;
+
+    // Copy to clipboard
+    navigator.clipboard.writeText(shareUrl).then(() => {
+        showSuccess(
+            `<strong>Share URL copied to clipboard!</strong><br>` +
+            `<div class="share-url">${shareUrl}</div>` +
+            `<small>Anyone with this link can view your exact configuration.</small>`
+        );
+    }).catch(err => {
+        // Fallback: show the URL for manual copying
+        showSuccess(
+            `<strong>Share URL:</strong><br>` +
+            `<div class="share-url">${shareUrl}</div>` +
+            `<small>Copy this URL to share your configuration.</small>`
+        );
+    });
+}
+
+// Load state from URL parameters
+function loadStateFromURL() {
+    const params = new URLSearchParams(window.location.search);
+
+    // Check if we have URL parameters
+    if (!params.has('lat') || !params.has('lon')) {
+        return null;
+    }
+
+    return {
+        model: params.get('model') || 'gefs',
+        lat: parseFloat(params.get('lat')),
+        lon: parseFloat(params.get('lon')),
+        startDate: params.get('start'),
+        endDate: params.get('end'),
+        compare: params.get('compare') === '1',
+        compYear: params.get('compYear') ? parseInt(params.get('compYear')) : null
+    };
+}
+
+// Apply URL state to the application
+function applyURLState(state) {
+    // Set model
+    if (state.model && MODEL_CONFIGS[state.model]) {
+        currentModel = state.model;
+        document.getElementById('model-select').value = state.model;
+    }
+
+    // Update model info and constraints
+    updateModelInfo();
+    updateDatePickerConstraints();
+
+    // Set location
+    setTimeout(() => {
+        if (state.lat && state.lon) {
+            selectLocation(state.lat, state.lon);
+            map.setView([state.lat, state.lon], 9);
+        }
+    }, 500);
+
+    // Set dates
+    setTimeout(() => {
+        if (state.startDate && window.startDatePicker) {
+            window.startDatePicker.setDate(state.startDate);
+        }
+        if (state.endDate && window.endDatePicker) {
+            window.endDatePicker.setDate(state.endDate);
+        }
+
+        // Set comparison
+        if (state.compare) {
+            document.getElementById('enable-comparison').checked = true;
+            comparisonEnabled = true;
+            document.getElementById('comparison-year').disabled = false;
+
+            // Update comparison year options
+            updateComparisonYearOptions();
+
+            // Set comparison year
+            setTimeout(() => {
+                if (state.compYear) {
+                    document.getElementById('comparison-year').value = state.compYear;
+                    comparisonYear = state.compYear;
+                }
+            }, 100);
+        }
+    }, 600);
 }

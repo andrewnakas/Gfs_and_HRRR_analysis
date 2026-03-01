@@ -32,6 +32,7 @@ A comprehensive weather analysis dashboard supporting multiple numerical weather
 - **Model-Specific Grid Snapping**: Automatically snaps to the appropriate grid resolution
 - **Flexible Date Range**: Select historical date ranges appropriate for each model
 - **Year-over-Year Comparison**: Compare current data with previous years
+- **Shareable URLs**: Generate and share links to exact configurations (location, dates, model, comparison settings)
 - **Comprehensive Weather Charts**:
   - Temperature Analysis (Max, Mean, Min)
   - Precipitation Analysis (Total, Rain, Snowfall)
@@ -65,6 +66,20 @@ Visit the [live demo](https://andrewnakas.github.io/Gfs_and_HRRR_analysis/) to t
 4. Optionally enable year-over-year comparison and select a comparison year
 5. Click "Fetch Weather Data" to load and visualize the weather information
 6. Scroll down to view all the weather analysis charts
+7. Click "Share This View" to generate a shareable URL with your exact configuration
+
+### Sharing Your Analysis
+
+After configuring your location, dates, and model settings, click the **"Share This View"** button to:
+- Generate a unique URL with all your settings encoded
+- Automatically copy the URL to your clipboard
+- Share the link with others to show them your exact analysis
+
+The shared URL includes:
+- Selected weather model (GEFS/GFS/HRRR)
+- Location coordinates
+- Date range
+- Comparison settings (if enabled)
 
 ## Local Development
 
